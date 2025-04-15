@@ -25,7 +25,7 @@ class Seal:
         self.name = name
         self.team = team
         self.pos = pos
-        self,mass = mass
+        self.mass = mass
         self.radius = radius
         self.hp = hp
         self.atk = atk
