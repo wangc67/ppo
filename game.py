@@ -1,7 +1,7 @@
 import numpy as np
 import random
-
-
+import tools
+import math
 
 class Config:
     H = 6
@@ -25,11 +25,11 @@ class Seal:
         self.name = name
         self.team = team
         self.pos = pos
-        self.mass = mass
-        self.radius = radius
+        self.mass = mass # 质量
+        self.radius = radius # 半径
         self.hp = hp
         self.atk = atk
-        self.velocity = np.array([0, 0])
+        self.velocity = np.array([0, 0]) # 速度
         self.moveable = True
 
     def draw(self):
@@ -46,11 +46,12 @@ class Game:
         self.B_members = {}
         self.B_score = 0
         self.first = None
+        self.Timer = tools.UniformDecelerationTimer()
         self.reset()
 
 
     def reset(self):
-        for i in range(num):
+        for i in range(self.num):
             self.A_members[i] = spawn(team=0, name=i)
             self.B_members[i] = spawn(team=1, name=i)
         self.A_score = 0
@@ -90,7 +91,24 @@ class Game:
     def check_collision_wall(self, seal:Seal):
         return {'seals':[seal], 'time':None, 'pos':None}
 
-    def collision_wall(self, seal:Seal):
+    def collision_wall(self, seal:Seal): #返回一个列表，包含与四壁的碰撞时间
+        x, y = seal.pos
+        vx, vy = seal.velocity
+        tx = []
+        theata = math.atan(abs(vy/vx)) # 角度
+        # 左右墙壁
+        if vx != 0:
+            tx_left = self.Timer(vx, Config.MU_GROUND * math.cos(theata), seal.radius-x)
+            tx_right = self.Timer(vx, Config.MU_GROUND * math.cos(theata), self.W-x-seal.radius)
+            if tx_left >= 0: tx.append(('left', tx_left))
+            if tx_right >= 0: tx.append(('right', tx_right))
+        # 上下墙壁
+        if vy != 0:
+            ty_down = self.Timer(vy, Config.MU_GROUND * math.sin(theata), seal.radius-y)
+            ty_up = self.Timer(vy, Config.MU_GROUND * math.sin(theata), self.H-y-seal.radius)
+            if ty_down >= 0: tx.append(('down', ty_down))
+            if ty_up >= 0: tx.append(('up', ty_up))
+        return tx
         pass
 
     def collision_seal(self, s1:Seal, s2:Seal):
