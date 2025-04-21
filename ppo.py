@@ -7,10 +7,10 @@ import torch.nn as nn
 
 
 class PPOConfig:
-    ACTOR_LR = 0.1
-    CRITIC_LR = 0.1
+    ACTOR_LR = 0.01
+    CRITIC_LR = 0.01
     GAMMA = 0.99
-    LAMBDA = 0.99
+    LAMBDA = 0.95
     EPS_CLIP = 0.5
 
     EPOCHS = 25
@@ -18,35 +18,35 @@ class PPOConfig:
     SEED = None
 
 class PolicyNet(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=24):
         super().__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.bn = nn.Batchnorm1d()
+        self.relu = nn.Relu()
+        self.fc2 = nn.Linear(64, 15)
         
     def forward(self, x):
-        # return mean and var of Gaussian prob of continuous actions
-        mu, std = 0, 1
-        return mu, std
+        # output: [0:3] softmax prob of seal_move, [3:7], [7:11], [11:15] mean, std of each seal's r,theta
+        # is it neccesary to make sure sup(v) > mean(v) > 0 ?
+        x = self.relu(self.bn1(self.fc1(x)))
+        x = self.fc2(x)
+        x = torch.concat(x[0:3], self.relu(x[3:]))
+        return x
 
 class ValueNet(nn.Module):
-    def __init__(self):
+    def __init__(self,, input_dim=24):
         super().__init__()
-        self.fc1 = nn.Linear(1, 1)
-        self.fc2 = nn.Linear(1, 1)
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.bn1 = nn.Batchnorm1d()
+        self.relu = nn.Relu()
+        self.fc2 = nn.Linear(64, 32)
+        self.bn2 = nn.Batchnorm1d()
+        self.fc3 = nn.Linear(32, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
-
-def compute_advantage(gamma, lmbda, td_delta):
-    # generalized advantage estimation
-    td_delta = td_delta.detach().numpy()
-    advantage_lst = []
-    advantage = 0.0
-    for delta in td_delta[::-1]:
-        advantage = gamma * lmbda * advantage + delta
-        advantage_lst.append(advantage)
-    advantage_lst.reverse()
-    return torch.tensor(advantage_lst)
-
+        x = self.relu(self.bn1(self.fc1(x)))
+        x = self.relu(self.bn2(self.fc2(x)))
+        return self.fc3(x)
 
 class PPO:
     def __init__(self, state_dim, hidden_dim, action_dim, 
@@ -80,6 +80,23 @@ class PPO:
     def save_model(self):
         pass
 
+    def compute_advantage(self, td_delta):
+        # generalized advantage estimation
+        td_delta = td_delta.detach().numpy()
+        advantage_lst = []
+        advantage = 0.0
+        for delta in td_delta[::-1]:
+            advantage = self.gamma * self.lmbda * advantage + delta
+            advantage_lst.append(advantage)
+        advantage_lst.reverse()
+        return torch.tensor(advantage_lst)
+
+    def choose_action(self, action_lst, mask):
+        idx = torch.argmax(torch.softmax(action_lst[0:3]+mask))
+        lst = list(action_lst[3+4*idx: 7+4*idx])
+        lst.append(idx)
+        return lst
+
     def update(self, transition_dict):
         states = torch.tensor(transition_dict['states'],
                               dtype=torch.float).to(self.device)
@@ -92,24 +109,23 @@ class PPO:
         dones = torch.tensor(transition_dict['dones'],
                              dtype=torch.float).view(-1, 1).to(self.device)
         
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 -
-                                                                       dones)
-        # td_delta = td_target - self.critic(states)
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+        td_delta = td_target - self.critic(states)
         
+        advantage = self.compute_advantage(td_delta)
 
-        
-        # advantage = compute_advantage()
-        
-        # mu, std = self.actor(states)
-        # action_dists = torch.distributions.Normal(mu.detach(),std.detach())
-
-        old_log_probs = action_dists.log_prob(actions)
+        mean_r, std_r, mean_th, std_th, idx = self.choose_action(self.actor(states))
+        mean_r, std_r, mean_th, std_th, idx = self.choose_action(self.actor(states))
+        action_dists_r = torch.distributions.Normal(mean_r, std_r)
+        action_dists_th = torch.distributions.Normal(mean_th, std_th)
+        old_log_probs = action_dists_r.log_prob(actions) * action_dists_mean.log_prob(actions)
 
         for _ in range(self.epochs):
-            mu, std = self.actor(states)
-            action_dists = torch.distributions.Normal(mu, std)
+            mean_r, std_r, mean_th, std_th, idx = self.choose_action(self.actor(states))
+            action_dists_r = torch.distributions.Normal(mean_r, std_r)
+            action_dists_th = torch.distributions.Normal(mean_th, std_th)
 
-            log_probs = action_dists.log_prob(actions)
+            log_probs = action_dists_r.log_prob(actions) * action_dists_mean.log_prob(actions)
 
             ratio = torch.exp(log_probs - old_log_probs)
             surr1 = ratio * advantage
